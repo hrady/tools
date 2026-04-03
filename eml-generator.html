@@ -46,9 +46,7 @@ body {
     hash.split('&').forEach(function(pair) {
       var i = pair.indexOf('=');
       if (i > -1) {
-        var k = decodeURIComponent(pair.substring(0, i));
-        var v = decodeURIComponent(pair.substring(i + 1));
-        p[k] = v;
+        p[decodeURIComponent(pair.substring(0, i))] = decodeURIComponent(pair.substring(i + 1));
       }
     });
 
@@ -61,21 +59,30 @@ body {
     var lang = p.lang || 'en';
     var invoicesRaw = p.invoices || '';
 
+    // Parse invoices — ONLY include overdue (days > 0)
     var invoices = [];
     if (invoicesRaw) {
       invoicesRaw.split('|').forEach(function(row) {
         var cols = row.split(',');
         if (cols.length >= 5) {
-          invoices.push({
-            number: cols[0].trim(),
-            invoiceDate: cols[1].trim(),
-            dueDate: cols[2].trim(),
-            days: parseInt(cols[3].trim()),
-            amount: cols[4].trim()
-          });
+          var days = parseInt(cols[3].trim());
+          if (days > 0) {
+            invoices.push({
+              number: cols[0].trim(),
+              invoiceDate: cols[1].trim(),
+              dueDate: cols[2].trim(),
+              days: days,
+              amount: cols[4].trim()
+            });
+          }
         }
       });
     }
+
+    // Sort by amount descending
+    invoices.sort(function(a, b) {
+      return parseFloat(b.amount.replace(/,/g,'')) - parseFloat(a.amount.replace(/,/g,''));
+    });
 
     function fmt(n) {
       var num = parseFloat(String(n).replace(/,/g, ''));
@@ -89,13 +96,47 @@ body {
       return '#2c3e50';
     }
 
-    // Shared styles
-    var pStyle = 'style="margin:6px 0;font-size:14px;"';
-    var wrapStyle = 'font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#333;line-height:1.5;max-width:700px;';
+    // Arabic date formatting
+    var arMonths = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+    var enMonths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-    // English invoice table
+    function toArDate(dateStr) {
+      // Handle DD-Mon-YYYY format
+      var parts = dateStr.match(/(\d+)-([A-Za-z]+)-(\d+)/);
+      if (parts) {
+        var idx = enMonths.indexOf(parts[2]);
+        if (idx > -1) return parts[1] + '-' + arMonths[idx] + '-' + parts[3];
+      }
+      // Handle YYYY-MM-DD format
+      parts = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+      if (parts) {
+        var m = parseInt(parts[2]) - 1;
+        return parts[3] + '-' + arMonths[m] + '-' + parts[1];
+      }
+      return dateStr;
+    }
+
+    function toArLetterDate(dateStr) {
+      var parts = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+      if (parts) {
+        var m = parseInt(parts[2]) - 1;
+        return parseInt(parts[3]) + ' ' + arMonths[m] + ' ' + parts[1];
+      }
+      return dateStr;
+    }
+
+    // Recalculate actual overdue total from filtered invoices
+    var overdueTotal = 0;
+    invoices.forEach(function(inv) {
+      overdueTotal += parseFloat(inv.amount.replace(/,/g,''));
+    });
+
+    var ps = 'margin:6px 0;font-size:14px;';
+    var ws = 'font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#333;line-height:1.5;max-width:700px;';
+
+    // English table
     function buildEnTable() {
-      if (invoices.length === 0) return '';
+      if (!invoices.length) return '';
       var t = '<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:13px;">';
       t += '<tr style="background:#15262E;color:#fff;">';
       t += '<th style="padding:8px;text-align:left;border:1px solid #ddd;">Invoice</th>';
@@ -104,7 +145,7 @@ body {
       t += '<th style="padding:8px;text-align:right;border:1px solid #ddd;">Days Overdue</th>';
       t += '<th style="padding:8px;text-align:right;border:1px solid #ddd;">Amount (SAR)</th></tr>';
       for (var i = 0; i < invoices.length; i++) {
-        var inv = invoices[i]; var bg = i % 2 === 0 ? '#fff' : '#f9f9f9';
+        var inv = invoices[i], bg = i % 2 === 0 ? '#fff' : '#f9f9f9';
         t += '<tr style="background:' + bg + ';">';
         t += '<td style="padding:7px 8px;border:1px solid #ddd;">' + inv.number + '</td>';
         t += '<td style="padding:7px 8px;border:1px solid #ddd;">' + inv.invoiceDate + '</td>';
@@ -113,73 +154,75 @@ body {
         t += '<td style="padding:7px 8px;border:1px solid #ddd;text-align:right;">' + fmt(inv.amount) + '</td></tr>';
       }
       t += '<tr style="background:#e8f4f8;font-weight:bold;">';
-      t += '<td colspan="4" style="padding:8px;border:1px solid #ddd;text-align:right;">Total Outstanding:</td>';
-      t += '<td style="padding:8px;border:1px solid #ddd;text-align:right;color:#15262E;">SAR ' + fmt(total) + '</td></tr></table>';
+      t += '<td colspan="4" style="padding:8px;border:1px solid #ddd;text-align:right;">Total Overdue:</td>';
+      t += '<td style="padding:8px;border:1px solid #ddd;text-align:right;color:#15262E;">SAR ' + fmt(overdueTotal) + '</td></tr></table>';
       return t;
     }
 
-    // Arabic invoice table
+    // Arabic table
     function buildArTable() {
-      if (invoices.length === 0) return '';
+      if (!invoices.length) return '';
       var t = '<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:13px;direction:rtl;">';
       t += '<tr style="background:#15262E;color:#fff;">';
-      t += '<th style="padding:8px;text-align:right;border:1px solid #ddd;">\u0631\u0642\u0645 \u0627\u0644\u0641\u0627\u062a\u0648\u0631\u0629</th>';
-      t += '<th style="padding:8px;text-align:right;border:1px solid #ddd;">\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u0641\u0627\u062a\u0648\u0631\u0629</th>';
-      t += '<th style="padding:8px;text-align:right;border:1px solid #ddd;">\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u0627\u0633\u062a\u062d\u0642\u0627\u0642</th>';
-      t += '<th style="padding:8px;text-align:left;border:1px solid #ddd;">\u0623\u064a\u0627\u0645 \u0627\u0644\u062a\u0623\u062e\u064a\u0631</th>';
-      t += '<th style="padding:8px;text-align:left;border:1px solid #ddd;">\u0627\u0644\u0645\u0628\u0644\u063a (\u0631.\u0633)</th></tr>';
+      t += '<th style="padding:8px;text-align:right;border:1px solid #ddd;">رقم الفاتورة</th>';
+      t += '<th style="padding:8px;text-align:right;border:1px solid #ddd;">تاريخ الفاتورة</th>';
+      t += '<th style="padding:8px;text-align:right;border:1px solid #ddd;">تاريخ الاستحقاق</th>';
+      t += '<th style="padding:8px;text-align:left;border:1px solid #ddd;">أيام التأخير</th>';
+      t += '<th style="padding:8px;text-align:left;border:1px solid #ddd;">المبلغ (ر.س)</th></tr>';
       for (var j = 0; j < invoices.length; j++) {
-        var inv = invoices[j]; var bg = j % 2 === 0 ? '#fff' : '#f9f9f9';
+        var inv = invoices[j], bg = j % 2 === 0 ? '#fff' : '#f9f9f9';
         t += '<tr style="background:' + bg + ';">';
         t += '<td style="padding:7px 8px;border:1px solid #ddd;text-align:right;">' + inv.number + '</td>';
-        t += '<td style="padding:7px 8px;border:1px solid #ddd;text-align:right;">' + inv.invoiceDate + '</td>';
-        t += '<td style="padding:7px 8px;border:1px solid #ddd;text-align:right;">' + inv.dueDate + '</td>';
+        t += '<td style="padding:7px 8px;border:1px solid #ddd;text-align:right;">' + toArDate(inv.invoiceDate) + '</td>';
+        t += '<td style="padding:7px 8px;border:1px solid #ddd;text-align:right;">' + toArDate(inv.dueDate) + '</td>';
         t += '<td style="padding:7px 8px;border:1px solid #ddd;text-align:left;color:' + daysColor(inv.days) + ';font-weight:bold;">' + inv.days + '</td>';
         t += '<td style="padding:7px 8px;border:1px solid #ddd;text-align:left;">' + fmt(inv.amount) + '</td></tr>';
       }
       t += '<tr style="background:#e8f4f8;font-weight:bold;">';
-      t += '<td colspan="4" style="padding:8px;border:1px solid #ddd;text-align:left;">\u0625\u062c\u0645\u0627\u0644\u064a \u0627\u0644\u0645\u0633\u062a\u062d\u0642:</td>';
-      t += '<td style="padding:8px;border:1px solid #ddd;text-align:left;color:#15262E;">' + fmt(total) + ' \u0631.\u0633</td></tr></table>';
+      t += '<td colspan="4" style="padding:8px;border:1px solid #ddd;text-align:left;">إجمالي المتأخر:</td>';
+      t += '<td style="padding:8px;border:1px solid #ddd;text-align:left;color:#15262E;">' + fmt(overdueTotal) + ' ر.س</td></tr></table>';
       return t;
     }
 
     // English letter
     var enHtml = [
-      '<div style="' + wrapStyle + '">',
-      '<p ' + pStyle + ' style="color:#888;margin:6px 0;">Date: ' + date + '</p>',
-      '<p ' + pStyle + '>Dear Valued Customer,</p>',
-      '<p ' + pStyle + '>We truly appreciate the business relationship we have built with <strong>' + customer + '</strong>. Your partnership means a great deal to us.</p>',
-      '<p ' + pStyle + '>As part of our regular account review, we noticed that your account currently has <strong>' + count + ' outstanding invoice' + (parseInt(count) !== 1 ? 's' : '') + '</strong> totaling <strong>SAR ' + fmt(total) + '</strong> that require your attention.</p>',
-      invoices.length > 0 ? '<h3 style="color:#15262E;border-bottom:2px solid #ED0C0C;padding-bottom:4px;margin:14px 0 8px;font-size:15px;">Top Outstanding Invoices</h3>' : '',
+      '<div style="' + ws + '">',
+      '<p style="' + ps + 'color:#888;">Date: ' + date + '</p>',
+      '<p style="' + ps + '">Dear Valued Customer,</p>',
+      '<p style="' + ps + '">We truly appreciate the business relationship we have built with <strong>' + customer + '</strong>. Your partnership means a great deal to us.</p>',
+      '<p style="' + ps + '">As part of our regular account review, we noticed that your account currently has <strong>' + invoices.length + ' overdue invoice' + (invoices.length !== 1 ? 's' : '') + '</strong> totaling <strong>SAR ' + fmt(overdueTotal) + '</strong> that require your attention.</p>',
+      invoices.length > 0 ? '<h3 style="color:#15262E;border-bottom:2px solid #ED0C0C;padding-bottom:4px;margin:14px 0 8px;font-size:15px;">Top Overdue Invoices</h3>' : '',
       buildEnTable(),
-      '<p ' + pStyle + '>Could we ask you to look into this within the next <strong>7 business days</strong>? If there is anything on our end causing a delay, please let us know and we will address it right away.</p>',
-      '<p ' + pStyle + '>We value our partnership and look forward to resolving this matter together.</p>',
-      '<p ' + pStyle + '>Warm regards,</p>',
-      '<p ' + pStyle + '><strong>Accounts Receivable</strong><br><strong>Zahid Group \u2014 Division ' + div + '</strong></p>',
+      '<p style="' + ps + '">Could we ask you to look into this within the next <strong>7 business days</strong>? If there is anything on our end causing a delay, please let us know and we will address it right away.</p>',
+      '<p style="' + ps + '">We value our partnership and look forward to resolving this matter together.</p>',
+      '<p style="' + ps + '">Warm regards,</p>',
+      '<p style="' + ps + '"><strong>Accounts Receivable</strong><br><strong>Zahid Group \u2014 Division ' + div + '</strong></p>',
       '</div>'
     ].join('\n');
 
     // Arabic letter
+    var arDateStr = toArLetterDate(date);
     var arHtml = [
-      '<div dir="rtl" style="' + wrapStyle + '">',
-      '<p ' + pStyle + ' style="color:#888;margin:6px 0;">\u0627\u0644\u062a\u0627\u0631\u064a\u062e: ' + date + '</p>',
-      '<p ' + pStyle + '>\u0639\u0645\u064a\u0644\u0646\u0627 \u0627\u0644\u0643\u0631\u064a\u0645\u060c</p>',
-      '<p ' + pStyle + '>\u0646\u0642\u062f\u0651\u0631 \u062d\u0642\u0627\u064b \u0639\u0644\u0627\u0642\u0629 \u0627\u0644\u0639\u0645\u0644 \u0627\u0644\u062a\u064a \u0628\u0646\u064a\u0646\u0627\u0647\u0627 \u0645\u0639 <strong>' + customer + '</strong>. \u0634\u0631\u0627\u0643\u062a\u0643\u0645 \u062a\u0639\u0646\u064a \u0644\u0646\u0627 \u0627\u0644\u0643\u062b\u064a\u0631.</p>',
-      '<p ' + pStyle + '>\u0636\u0645\u0646 \u0645\u0631\u0627\u062c\u0639\u062a\u0646\u0627 \u0627\u0644\u062f\u0648\u0631\u064a\u0629 \u0644\u0644\u062d\u0633\u0627\u0628\u0627\u062a\u060c \u0644\u0627\u062d\u0638\u0646\u0627 \u0623\u0646 \u062d\u0633\u0627\u0628\u0643\u0645 \u064a\u062d\u062a\u0648\u064a \u062d\u0627\u0644\u064a\u0627\u064b \u0639\u0644\u0649 <strong>' + count + ' \u0641\u0627\u062a\u0648\u0631\u0629 \u0645\u0633\u062a\u062d\u0642\u0629</strong> \u0628\u0625\u062c\u0645\u0627\u0644\u064a <strong>' + fmt(total) + ' \u0631.\u0633</strong> \u062a\u062a\u0637\u0644\u0628 \u0627\u0647\u062a\u0645\u0627\u0645\u0643\u0645.</p>',
-      invoices.length > 0 ? '<h3 style="color:#15262E;border-bottom:2px solid #ED0C0C;padding-bottom:4px;margin:14px 0 8px;font-size:15px;">\u0623\u0639\u0644\u0649 \u0627\u0644\u0641\u0648\u0627\u062a\u064a\u0631 \u0627\u0644\u0645\u0633\u062a\u062d\u0642\u0629</h3>' : '',
+      '<div dir="rtl" style="' + ws + '">',
+      '<p style="' + ps + 'color:#888;">التاريخ: ' + arDateStr + '</p>',
+      '<p style="' + ps + '">عميلنا الكريم،</p>',
+      '<p style="' + ps + '">نقدّر حقاً علاقة العمل التي بنيناها مع <strong>' + customer + '</strong>. شراكتكم تعني لنا الكثير.</p>',
+      '<p style="' + ps + '">ضمن مراجعتنا الدورية للحسابات، لاحظنا أن حسابكم يحتوي حالياً على <strong>' + invoices.length + ' فاتورة متأخرة</strong> بإجمالي <strong>' + fmt(overdueTotal) + ' ر.س</strong> تتطلب اهتمامكم.</p>',
+      invoices.length > 0 ? '<h3 style="color:#15262E;border-bottom:2px solid #ED0C0C;padding-bottom:4px;margin:14px 0 8px;font-size:15px;">أعلى الفواتير المتأخرة</h3>' : '',
       buildArTable(),
-      '<p ' + pStyle + '>\u0647\u0644 \u064a\u0645\u0643\u0646\u0643\u0645 \u0627\u0644\u062a\u0643\u0631\u0651\u0645 \u0628\u0645\u0631\u0627\u062c\u0639\u0629 \u0647\u0630\u0627 \u0627\u0644\u0623\u0645\u0631 \u062e\u0644\u0627\u0644 <strong>7 \u0623\u064a\u0627\u0645 \u0639\u0645\u0644</strong>\u061f \u0625\u0630\u0627 \u0643\u0627\u0646 \u0647\u0646\u0627\u0643 \u0623\u064a \u0634\u064a\u0621 \u0645\u0646 \u0637\u0631\u0641\u0646\u0627 \u0642\u062f \u064a\u064f\u0633\u0628\u0651\u0628 \u062a\u0623\u062e\u064a\u0631\u0627\u064b\u060c \u064a\u064f\u0631\u062c\u0649 \u0625\u0639\u0644\u0627\u0645\u0646\u0627 \u0648\u0633\u0646\u062a\u0639\u0627\u0645\u0644 \u0645\u0639\u0647 \u0641\u0648\u0631\u0627\u064b.</p>',
-      '<p ' + pStyle + '>\u0646\u064f\u0642\u062f\u0651\u0631 \u0634\u0631\u0627\u0643\u062a\u0643\u0645 \u0648\u0646\u062a\u0637\u0644\u0639 \u0644\u062d\u0644 \u0647\u0630\u0627 \u0627\u0644\u0623\u0645\u0631 \u0645\u0639\u0627\u064b.</p>',
-      '<p ' + pStyle + '>\u0645\u0639 \u0623\u0637\u064a\u0628 \u0627\u0644\u062a\u062d\u064a\u0627\u062a\u060c</p>',
-      '<p ' + pStyle + '><strong>\u0627\u0644\u0630\u0645\u0645 \u0627\u0644\u0645\u062f\u064a\u0646\u0629</strong><br><strong>\u0645\u062c\u0645\u0648\u0639\u0629 \u0632\u0627\u0647\u062f \u2014 \u0642\u0633\u0645 ' + div + '</strong></p>',
+      '<p style="' + ps + '">هل يمكنكم التكرّم بمراجعة هذا الأمر خلال <strong>7 أيام عمل</strong>؟ إذا كان هناك أي شيء من طرفنا قد يُسبّب تأخيراً، يُرجى إعلامنا وسنتعامل معه فوراً.</p>',
+      '<p style="' + ps + '">نُقدّر شراكتكم ونتطلع لحل هذا الأمر معاً.</p>',
+      '<p style="' + ps + '">مع أطيب التحيات،</p>',
+      '<p style="' + ps + '"><strong>الذمم المدينة</strong><br><strong>مجموعة زاهد \u2014 قسم ' + div + '</strong></p>',
       '</div>'
     ].join('\n');
 
     var letterHtml = lang === 'ar' ? arHtml : enHtml;
     var subjectText = lang === 'ar'
-      ? '\u062a\u0630\u0643\u064a\u0631 \u0648\u062f\u0651\u064a \u2014 \u0641\u0648\u0627\u062a\u064a\u0631 \u0645\u0633\u062a\u062d\u0642\u0629 | ' + customer
+      ? 'تذكير ودّي \u2014 فواتير مستحقة | ' + customer
       : 'Friendly Reminder \u2014 Outstanding Invoices | ' + customer;
 
+    var bodyDir = lang === 'ar' ? ' dir="rtl"' : '';
     var eml = [
       'From: ',
       'To: ',
@@ -189,8 +232,8 @@ body {
       'Content-Type: text/html; charset=UTF-8',
       '',
       '<!DOCTYPE html>',
-      '<html><head><meta charset="utf-8"></head>',
-      '<body style="margin:0;padding:20px;">',
+      '<html' + bodyDir + '><head><meta charset="utf-8"></head>',
+      '<body style="margin:0;padding:20px;"' + bodyDir + '>',
       letterHtml,
       '</body></html>'
     ].join('\r\n');
@@ -210,13 +253,8 @@ body {
     document.getElementById('spinner').style.display = 'none';
     document.getElementById('status').innerHTML =
       '<span class="success">\u2713 Email downloaded</span><br><br>' +
-      '<span style="font-size:13px;color:#666;">Closing this tab...</span>';
-
-    // Close tab after download
-    setTimeout(function() {
-      window.open('', '_self');
-      window.close();
-    }, 1500);
+      '<span style="font-size:13px;color:#666;">Closing...</span>';
+    setTimeout(function() { window.open('', '_self'); window.close(); }, 1500);
 
   } catch(e) {
     document.getElementById('spinner').style.display = 'none';
