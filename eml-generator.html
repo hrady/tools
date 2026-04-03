@@ -212,8 +212,11 @@ body {
       '<span class="success">\u2713 Email downloaded</span><br><br>' +
       '<span style="font-size:13px;color:#666;">Closing this tab...</span>';
 
-    // Close tab after short delay to let download start
-    setTimeout(function() { window.close(); }, 1500);
+    // Close tab after download
+    setTimeout(function() {
+      window.open('', '_self');
+      window.close();
+    }, 1500);
 
   } catch(e) {
     document.getElementById('spinner').style.display = 'none';
