@@ -38,63 +38,75 @@ body {
 
 <script>
 (function() {
-  const params = new URLSearchParams(window.location.search);
-  const subject = params.get('subject') || 'Outstanding Balance Review';
-  const body = params.get('body') || '';
-  const lang = params.get('lang') || 'en';
+  try {
+    // Read from URL fragment (#) — not query params (?)
+    // This avoids server-side URI length limits
+    // Format: #subject=...&lang=...&body=...
+    var hash = window.location.hash.substring(1);
+    if (!hash) {
+      document.getElementById('spinner').style.display = 'none';
+      document.getElementById('status').innerHTML = '<span class="error">No letter content provided.</span>';
+      return;
+    }
 
-  if (!body) {
+    var params = new URLSearchParams(hash);
+    var subject = params.get('subject') || 'Outstanding Balance Review';
+    var body = params.get('body') || '';
+    var lang = params.get('lang') || 'en';
+
+    if (!body) {
+      document.getElementById('spinner').style.display = 'none';
+      document.getElementById('status').innerHTML = '<span class="error">No letter body provided.</span>';
+      return;
+    }
+
+    var decodedBody = decodeURIComponent(body);
+
+    // Wrap in RTL div if Arabic
+    var htmlBody = lang === 'ar'
+      ? '<div dir="rtl" style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;">' + decodedBody + '</div>'
+      : '<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;">' + decodedBody + '</div>';
+
+    // Build .eml content with HTML body
+    var eml = [
+      'From: ',
+      'To: ',
+      'Subject: ' + subject,
+      'MIME-Version: 1.0',
+      'X-Unsent: 1',
+      'Content-Type: text/html; charset=UTF-8',
+      '',
+      '<!DOCTYPE html>',
+      '<html><head><meta charset="utf-8"></head>',
+      '<body>',
+      htmlBody,
+      '</body></html>'
+    ].join('\r\n');
+
+    // Create blob and trigger download
+    var blob = new Blob([eml], { type: 'message/rfc822' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+
+    var safeSubject = subject.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 40);
+    var date = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = 'Dunning_' + safeSubject + '_' + date + '.eml';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
     document.getElementById('spinner').style.display = 'none';
-    document.getElementById('status').innerHTML = '<span class="error">No letter content provided.</span>';
-    return;
+    document.getElementById('status').innerHTML =
+      '<span class="success">\u2713 Email downloaded</span><br><br>' +
+      '<span style="font-size:13px;color:#666;">Double-click the .eml file to open in Outlook.<br>' +
+      'Add the recipient and click Send.</span>';
+
+  } catch(e) {
+    document.getElementById('spinner').style.display = 'none';
+    document.getElementById('status').innerHTML = '<span class="error">Error: ' + e.message + '</span>';
   }
-
-  // Decode the body (it comes URL-encoded from the agent)
-  const decodedBody = decodeURIComponent(body);
-
-  // Wrap in RTL div if Arabic
-  const htmlBody = lang === 'ar'
-    ? '<div dir="rtl" style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;">' + decodedBody + '</div>'
-    : '<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;">' + decodedBody + '</div>';
-
-  // Build the .eml content
-  const boundary = 'boundary_zahid_' + Date.now();
-  const eml = [
-    'From: ',
-    'To: ',
-    'Subject: ' + subject,
-    'MIME-Version: 1.0',
-    'X-Unsent: 1',
-    'Content-Type: text/html; charset=UTF-8',
-    '',
-    '<!DOCTYPE html>',
-    '<html><head><meta charset="utf-8"></head>',
-    '<body>',
-    htmlBody,
-    '</body></html>'
-  ].join('\r\n');
-
-  // Create blob and trigger download
-  const blob = new Blob([eml], { type: 'message/rfc822' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  
-  // Build filename from subject
-  const safeSubject = subject.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 40);
-  const date = new Date().toISOString().slice(0, 10);
-  a.href = url;
-  a.download = 'Dunning_' + safeSubject + '_' + date + '.eml';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-
-  // Update UI
-  document.getElementById('spinner').style.display = 'none';
-  document.getElementById('status').innerHTML = 
-    '<span class="success">✓ Email downloaded</span><br><br>' +
-    '<span style="font-size:13px;color:#666;">Double-click the .eml file to open in Outlook.<br>' +
-    'Add the recipient and click Send.</span>';
 })();
 </script>
 </body>
